@@ -112,13 +112,24 @@
     #spinner {
       display: none;
       text-align: center;
-      padding: 24px;
-      font-size: 1.1rem;
+      padding: 24px 16px;
       color: #aac4e0;
     }
-    #spinner .dot { display: inline-block; animation: blink 1s infinite; }
-    #spinner .dot:nth-child(2) { animation-delay: 0.2s; }
-    #spinner .dot:nth-child(3) { animation-delay: 0.4s; }
+    #spinner-msg { font-size: 1.1rem; margin-bottom: 14px; min-height: 1.5em; }
+    #progress-bar-wrap {
+      width: 100%;
+      background: #2a2a2a;
+      border-radius: 8px;
+      overflow: hidden;
+      height: 10px;
+    }
+    #progress-bar {
+      height: 10px;
+      width: 0%;
+      background: #4a90d9;
+      border-radius: 8px;
+      transition: width 0.3s ease;
+    }
     @keyframes blink { 0%, 80%, 100% { opacity: 0; } 40% { opacity: 1; } }
 
     #result-card {
@@ -256,7 +267,7 @@
 
 <header>
   <h1>Pod Recall Checker</h1>
-  <p>Recall CC-5464839 · Not affiliated with Insulet · Updated May 2026</p>
+  <p>Recall CC-5464839 · Not affiliated with Insulet · Updated May 2026 · <span id="ver">v1.4</span></p>
 </header>
 
 <div id="camera-section">
@@ -274,7 +285,8 @@
 
 <div id="status-area">
   <div id="spinner">
-    Reading lot number<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
+    <div id="spinner-msg">Starting up…</div>
+    <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
   </div>
   <div id="result-card">
     <div id="result-icon"></div>
@@ -466,16 +478,24 @@ function pickFile() {
 //  OCR
 // ─────────────────────────────────────────────
 async function runOCR(imageSource) {
-  showSpinner(true);
+  setSpinner('Starting up…', 0);
+  document.getElementById('spinner').style.display = 'block';
   hideResult();
   hideCandidates();
 
   try {
+    const statusLabels = {
+      'loading tesseract core':     'Loading OCR engine…',
+      'initializing tesseract':     'Initializing OCR…',
+      'loading language traineddata': 'Downloading language data\n(first scan only, ~10 MB)…',
+      'initialized tesseract':      'OCR ready…',
+      'recognizing text':           'Reading lot number…',
+    };
     const worker = await Tesseract.createWorker('eng', 1, {
-      logger: () => {},
-      // Pin language data to jsDelivr to stay within our Content Security Policy.
-      // Without this, Tesseract defaults to tessdata.projectnaptha.com which is
-      // blocked by CSP and causes the scan to hang silently.
+      logger: ({ status, progress }) => {
+        const msg = statusLabels[status] || status;
+        setSpinner(msg, Math.round((progress || 0) * 100));
+      },
       langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js-data@4.0.0/tessdata_fast',
     });
     await worker.setParameters({
@@ -520,6 +540,12 @@ async function runOCR(imageSource) {
 // ─────────────────────────────────────────────
 function showSpinner(on) {
   document.getElementById('spinner').style.display = on ? 'block' : 'none';
+  if (!on) setSpinner('', 0);
+}
+
+function setSpinner(msg, pct) {
+  document.getElementById('spinner-msg').textContent = msg;
+  document.getElementById('progress-bar').style.width = pct + '%';
 }
 
 function hideResult() {
