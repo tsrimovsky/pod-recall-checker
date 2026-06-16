@@ -6,7 +6,7 @@
     Content Security Policy:
     - default-src 'none'            : block everything not explicitly listed
     - script-src 'self' + jsDelivr  : allow only our inline script and the pinned CDN
-    - connect-src cdn.jsdelivr.net  : Tesseract fetches its own worker/lang assets
+    - connect-src cdn.jsdelivr.net  : Tesseract fetches worker + language data from same CDN
     - img-src 'self' blob: data:    : camera frames (blob:) and captured images (data:)
     - style-src 'unsafe-inline'     : inline <style> block only (no external CSS)
     - media-src 'self'              : camera stream
@@ -482,7 +482,13 @@ async function runOCR(imageSource) {
   hideCandidates();
 
   try {
-    const worker = await Tesseract.createWorker('eng', 1, { logger: () => {} });
+    const worker = await Tesseract.createWorker('eng', 1, {
+      logger: () => {},
+      // Pin language data to jsDelivr to stay within our Content Security Policy.
+      // Without this, Tesseract defaults to tessdata.projectnaptha.com which is
+      // blocked by CSP and causes the scan to hang silently.
+      langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js-data@4.0.0/tessdata_fast',
+    });
     await worker.setParameters({
       tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ',
       tessedit_pageseg_mode: '6', // uniform block of text
