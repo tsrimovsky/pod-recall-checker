@@ -16,7 +16,7 @@ The page organizes lots by product and region. The `AFFECTED_LOTS` set in `pod-r
 
 ### 2. Add new lots to the HTML file
 
-Open `pod-recall-checker.html` and find the `AFFECTED_LOTS` block near the top of the `<script>` section. Add new lot numbers to the appropriate comment group:
+Open `lots.js` and add new lot numbers to the appropriate comment group:
 
 ```js
 const AFFECTED_LOTS = new Set([
@@ -50,7 +50,22 @@ In the `<header>` section, update the subtitle line to reflect when you last syn
 <p>Recall CC-5464839 · Not affiliated with Insulet · Updated [Month Year]</p>
 ```
 
-### 4. Update the source comment
+
+### 4. Recompute the SRI hash for lots.js
+
+Any change to `lots.js` invalidates the existing SRI hash. Recompute it:
+
+```bash
+cat lots.js | openssl dgst -sha384 -binary | openssl base64 -A
+```
+
+Then update the `integrity` attribute on the `<script src="lots.js">` tag near the bottom of `pod-recall-checker.html`:
+
+```html
+<script src="lots.js" integrity="sha384-<new hash here>" crossorigin="anonymous"></script>
+```
+
+### 5. Update the source comment
 
 Near the top of the `AFFECTED_LOTS` block, update the date comment:
 
@@ -58,7 +73,7 @@ Near the top of the `AFFECTED_LOTS` block, update the date comment:
 //  Source: omnipod.com/mdc/check-pod-lot?c=CC-5464839, [Month Year]
 ```
 
-### 5. Open a pull request
+### 6. Open a pull request
 
 Include in the PR description:
 - The date you checked the Insulet recall page
