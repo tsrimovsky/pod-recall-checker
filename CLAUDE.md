@@ -59,7 +59,7 @@ curl -sL https://cdn.jsdelivr.net/npm/tesseract.js@X.Y.Z/dist/tesseract.min.js \
 
 Paste result (prefixed `sha384-`) into the `integrity` attribute on the Tesseract `<script>` tag.
 
-## Current SRI hashes (v1.4)
+## Current SRI hashes (v1.5)
 
 - `tesseract.js@5.1.1`: `sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F`
 - `lots.js`: `sha384-OVZaEI1xaHZ5+vZEobZxKNyGtAkY8W81AsUSS07teu8PlIdydLVaNwNm1XQs/zzr`
