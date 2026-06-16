@@ -22,7 +22,7 @@ Always work on `split-lots-file`. Do not merge into `main` without thinking abou
 ## Key technical decisions
 
 - **No CSP meta tag** — a `Content-Security-Policy` header was removed because it blocked Tesseract's runtime fetch of language data from `tessdata.projectnaptha.com`. Do not re-add it without testing on iOS Safari with a real scan.
-- **`langPath` pinned to jsDelivr** — `createWorker` sets `langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js-data@4.0.0/tessdata_fast'` to ensure language data loads from the same CDN as the script.
+- **`langPath` set to `tessdata.projectnaptha.com`** — `createWorker` sets `langPath: 'https://tessdata.projectnaptha.com/4.0.0'`. The jsDelivr path (`tesseract.js-data@4.0.0/tessdata_fast`) caused the download to hang indefinitely; switching to projectnaptha (Tesseract.js's native host) fixed it. No CSP restriction since the meta tag was removed.
 - **SRI on both scripts** — `tesseract.min.js` and `lots.js` have `integrity` attributes. Any edit to `lots.js` requires recomputing the hash (see below).
 - **`AFFECTED_LOTS` is a `Set`** — O(1) lookup; lot numbers stored as uppercase strings.
 - **DOM-only manipulation** — all dynamic content uses `textContent`/`createElement`; no `innerHTML` with user data.

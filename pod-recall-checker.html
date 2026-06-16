@@ -492,13 +492,21 @@ async function runOCR(imageSource) {
   hideResult();
   hideCandidates();
 
+  let timedOut = false;
+  const initTimeout = setTimeout(() => {
+    timedOut = true;
+    showSpinner(false);
+    showResult('unknown', '', 'Download timed out',
+      'OCR engine did not load. Check your connection and try again,\nor type the lot number manually below.');
+  }, 90000);
+
   try {
     const statusLabels = {
-      'loading tesseract core':     'Loading OCR engine…',
-      'initializing tesseract':     'Initializing OCR…',
+      'loading tesseract core':       'Loading OCR engine…',
+      'initializing tesseract':       'Initializing OCR…',
       'loading language traineddata': 'Downloading language data\n(first scan only, ~10 MB)…',
-      'initialized tesseract':      'OCR ready…',
-      'recognizing text':           'Reading lot number…',
+      'initialized tesseract':        'OCR ready…',
+      'recognizing text':             'Reading lot number…',
     };
     const worker = await Tesseract.createWorker('eng', 1, {
       logger: ({ status, progress }) => {
@@ -507,8 +515,10 @@ async function runOCR(imageSource) {
         document.getElementById('progress-bar-wrap').classList.toggle('indeterminate', isDownload);
         setSpinner(msg, isDownload ? 0 : Math.round((progress || 0) * 100));
       },
-      langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js-data@4.0.0/tessdata_fast',
+      langPath: 'https://tessdata.projectnaptha.com/4.0.0',
     });
+    clearTimeout(initTimeout);
+    if (timedOut) { await worker.terminate(); return; }
     await worker.setParameters({
       tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ',
       tessedit_pageseg_mode: '6', // uniform block of text
@@ -539,6 +549,7 @@ async function runOCR(imageSource) {
       showCandidates(candidates);
     }
   } catch (err) {
+    clearTimeout(initTimeout);
     showSpinner(false);
     showResult('unknown', '', 'OCR Error',
       'Could not process image.\nPlease type the lot number manually below.');
