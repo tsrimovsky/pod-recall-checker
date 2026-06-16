@@ -130,6 +130,15 @@
       border-radius: 8px;
       transition: width 0.3s ease;
     }
+    #progress-bar-wrap.indeterminate #progress-bar {
+      width: 40% !important;
+      transition: none;
+      animation: indeterminate-slide 1.4s ease-in-out infinite;
+    }
+    @keyframes indeterminate-slide {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(350%); }
+    }
     @keyframes blink { 0%, 80%, 100% { opacity: 0; } 40% { opacity: 1; } }
 
     #result-card {
@@ -494,7 +503,9 @@ async function runOCR(imageSource) {
     const worker = await Tesseract.createWorker('eng', 1, {
       logger: ({ status, progress }) => {
         const msg = statusLabels[status] || status;
-        setSpinner(msg, Math.round((progress || 0) * 100));
+        const isDownload = status === 'loading language traineddata';
+        document.getElementById('progress-bar-wrap').classList.toggle('indeterminate', isDownload);
+        setSpinner(msg, isDownload ? 0 : Math.round((progress || 0) * 100));
       },
       langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js-data@4.0.0/tessdata_fast',
     });
@@ -540,7 +551,10 @@ async function runOCR(imageSource) {
 // ─────────────────────────────────────────────
 function showSpinner(on) {
   document.getElementById('spinner').style.display = on ? 'block' : 'none';
-  if (!on) setSpinner('', 0);
+  if (!on) {
+    setSpinner('', 0);
+    document.getElementById('progress-bar-wrap').classList.remove('indeterminate');
+  }
 }
 
 function setSpinner(msg, pct) {

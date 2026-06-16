@@ -74,4 +74,4 @@ After pushing, Pages typically propagates in 1–2 minutes. The version string i
 
 - **iOS Safari only** for camera scanning — other iOS browsers don't expose `getUserMedia`
 - **First scan requires internet** to fetch Tesseract language data (~10 MB, cached by browser after that)
-- **Git operations from the Claude Cowork sandbox fail** due to `.git` directory permission restrictions on the mounted folder — run all `git` and `gh` commands in your own Terminal
+- **Git and gh commands work normally** — project is accessed via Claude Code CLI, so `git` and `gh` can be run directly without user intervention
