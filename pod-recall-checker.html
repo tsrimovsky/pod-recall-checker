@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <!--
+    Content Security Policy:
+    - default-src 'none'            : block everything not explicitly listed
+    - script-src 'self' + jsDelivr  : allow only our inline script and the pinned CDN
+    - connect-src cdn.jsdelivr.net  : Tesseract fetches its own worker/lang assets
+    - img-src 'self' blob: data:    : camera frames (blob:) and captured images (data:)
+    - style-src 'unsafe-inline'     : inline <style> block only (no external CSS)
+    - media-src 'self'              : camera stream
+    - worker-src blob:              : Tesseract spins up a Web Worker from a blob URL
+  -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'none';
+    script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline';
+    connect-src https://cdn.jsdelivr.net;
+    img-src 'self' blob: data:;
+    style-src 'unsafe-inline';
+    media-src 'self';
+    worker-src blob:;
+  ">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Pod Recall Checker">
+  <title>Pod Recall Checker</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #111;
+      color: #fff;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      overflow-x: hidden;
+    }
+
+    header {
+      width: 100%;
+      background: #1a1a2e;
+      padding: 16px 20px 12px;
+      text-align: center;
+      border-bottom: 3px solid #4a90d9;
+    }
+    header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.03em; }
+    header p  { font-size: 0.85rem; color: #aac4e0; margin-top: 4px; }
+
+    /* ── Camera ── */
+    #camera-section { width: 100%; max-width: 600px; padding: 16px 16px 0; }
+
+    #viewfinder-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4/3;
+      background: #000;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 2px solid #333;
+    }
+    #video { width: 100%; height: 100%; object-fit: cover; }
+
+    /* Corner guides */
+    #viewfinder-wrap::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(#fff 2px, transparent 2px) 20% 30% / 60px 2px no-repeat,
+        linear-gradient(#fff 2px, transparent 2px) 20% 30% / 2px 60px no-repeat,
+        linear-gradient(#fff 2px, transparent 2px) 80% 30% / -60px 2px no-repeat,
+        linear-gradient(#fff 2px, transparent 2px) 80% 30% / 2px 60px no-repeat,
+        linear-gradient(#fff 2px, transparent 2px) 20% 70% / 60px 2px no-repeat,
+        linear-gradient(#fff 2px, transparent 2px) 20% 70% / 2px -60px no-repeat,
+        linear-gradient(#fff 2px, transparent 2px) 80% 70% / -60px 2px no-repeat,
+        linear-gradient(#fff 2px, transparent 2px) 80% 70% / 2px -60px no-repeat;
+      pointer-events: none;
+      opacity: 0.5;
+    }
+
+    #canvas { display: none; }
+    #frozen-img {
+      display: none;
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* ── Buttons ── */
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      padding: 16px;
+      width: 100%;
+      max-width: 600px;
+    }
+    button {
+      flex: 1;
+      border: none;
+      border-radius: 14px;
+      font-size: 1.2rem;
+      font-weight: 700;
+      padding: 18px 10px;
+      cursor: pointer;
+      transition: transform 0.1s, opacity 0.2s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    button:active  { transform: scale(0.96); }
+    button:disabled { opacity: 0.35; cursor: default; }
+
+    #btn-scan   { background: #4a90d9; color: #fff; font-size: 1.4rem; }
+    #btn-retake { background: #444; color: #fff; display: none; }
+
+    /* ── Result card ── */
+    #status-area { width: 100%; max-width: 600px; padding: 0 16px 16px; }
+
+    #spinner {
+      display: none;
+      text-align: center;
+      padding: 24px;
+      font-size: 1.1rem;
+      color: #aac4e0;
+    }
+    #spinner .dot { display: inline-block; animation: blink 1s infinite; }
+    #spinner .dot:nth-child(2) { animation-delay: 0.2s; }
+    #spinner .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes blink { 0%, 80%, 100% { opacity: 0; } 40% { opacity: 1; } }
+
+    #result-card {
+      display: none;
+      border-radius: 20px;
+      padding: 28px 24px;
+      text-align: center;
+      margin-top: 4px;
+    }
+    #result-card.safe    { background: #0a3d1e; border: 4px solid #22c55e; }
+    #result-card.recall  { background: #3d0a0a; border: 4px solid #ef4444; }
+    #result-card.unknown { background: #2a2a2a; border: 4px solid #888; }
+
+    #result-icon  { font-size: 4rem; line-height: 1; }
+    #result-title {
+      font-size: 2.4rem; font-weight: 900;
+      margin: 8px 0 6px; letter-spacing: 0.05em;
+    }
+    #result-card.safe    #result-title { color: #22c55e; }
+    #result-card.recall  #result-title { color: #ef4444; }
+    #result-card.unknown #result-title { color: #aaa; }
+
+    #result-lot {
+      font-size: 1.3rem;
+      font-family: 'Courier New', monospace;
+      font-weight: 700;
+      color: #fff;
+      background: rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 6px 12px;
+      display: inline-block;
+      margin: 4px 0 10px;
+    }
+    #result-detail { font-size: 1rem; color: #ccc; line-height: 1.5; white-space: pre-line; }
+
+    /* ── Manual entry ── */
+    #manual-section { width: 100%; max-width: 600px; padding: 0 16px 24px; }
+    #manual-section details {
+      background: #1e1e1e;
+      border-radius: 14px;
+      border: 1px solid #333;
+      overflow: hidden;
+    }
+    #manual-section summary {
+      padding: 16px;
+      font-size: 1rem; font-weight: 600;
+      cursor: pointer; color: #aac4e0;
+      list-style: none;
+    }
+    #manual-section summary::-webkit-details-marker { display: none; }
+    #manual-section summary::before { content: '⌨️  '; }
+    .manual-inner { padding: 4px 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+
+    #lot-input {
+      background: #111;
+      border: 2px solid #444;
+      border-radius: 10px;
+      color: #fff;
+      font-size: 1.3rem;
+      font-family: 'Courier New', monospace;
+      padding: 14px;
+      width: 100%;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    #lot-input:focus { outline: none; border-color: #4a90d9; }
+
+    #btn-manual-check { background: #4a6d9d; color: #fff; font-size: 1.1rem; }
+
+    /* Partial match list */
+    #partial-results { display: none; margin-top: 12px; }
+    #partial-results h3 { font-size: 1rem; color: #aac4e0; margin-bottom: 8px; }
+
+    .partial-match {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+    .partial-match:active { background: #252525; }
+    .partial-match .pm-lot {
+      font-family: 'Courier New', monospace;
+      font-size: 1.1rem;
+      color: #fff;
+    }
+    .partial-match .pm-lot em {
+      font-style: normal;
+      color: #f59e0b;
+      font-weight: 700;
+    }
+    .partial-match .pm-badge {
+      font-size: 0.85rem; font-weight: 700;
+      padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    }
+    .partial-match .pm-badge.bad { background: #3d0a0a; color: #ef4444; border: 1px solid #ef4444; }
+    #partial-too-many { display: none; color: #888; font-size: 0.95rem; padding: 8px 0; text-align: center; }
+
+    /* ── Raw OCR (collapsed debug view) ── */
+    #ocr-section { display: none; width: 100%; max-width: 600px; padding: 0 16px 24px; }
+    #ocr-section details { background: #1a1a1a; border-radius: 10px; border: 1px solid #2a2a2a; }
+    #ocr-section summary { padding: 10px 14px; font-size: 0.85rem; color: #666; cursor: pointer; list-style: none; }
+    #ocr-section summary::-webkit-details-marker { display: none; }
+    #ocr-raw {
+      padding: 10px 14px; font-size: 0.75rem; color: #555;
+      font-family: 'Courier New', monospace;
+      white-space: pre-wrap; word-break: break-all;
+      max-height: 150px; overflow-y: auto;
+    }
+
+    /* ── OCR candidates ── */
+    #candidates-list { display: none; width: 100%; max-width: 600px; padding: 0 16px 16px; }
+    #candidates-list h3 { font-size: 0.9rem; color: #888; margin-bottom: 8px; }
+    .cand-btn {
+      display: inline-block;
+      background: #2a2a2a; border: 1px solid #444; border-radius: 8px;
+      padding: 8px 14px; margin: 4px;
+      font-size: 1rem; font-family: 'Courier New', monospace; color: #ddd;
+      cursor: pointer; flex: none;
+    }
+    .cand-btn:active { background: #3a3a3a; }
+
+    footer {
+      margin-top: auto;
+      padding: 12px 16px;
+      font-size: 0.75rem; color: #444; text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Pod Recall Checker</h1>
+  <p>Recall CC-5464839 · Not affiliated with Insulet · Updated May 2026</p>
+</header>
+
+<div id="camera-section">
+  <div id="viewfinder-wrap">
+    <video id="video" autoplay playsinline muted></video>
+    <img id="frozen-img" alt="Captured frame">
+  </div>
+  <canvas id="canvas"></canvas>
+</div>
+
+<div class="btn-row">
+  <button type="button" id="btn-scan">📷 Scan Lot Number</button>
+  <button type="button" id="btn-retake">↩ Retake</button>
+</div>
+
+<div id="status-area">
+  <div id="spinner">
+    Reading lot number<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
+  </div>
+  <div id="result-card">
+    <div id="result-icon"></div>
+    <div id="result-title"></div>
+    <div id="result-lot"></div>
+    <div id="result-detail"></div>
+  </div>
+</div>
+
+<div id="candidates-list">
+  <h3>Multiple lot numbers found — tap to check:</h3>
+  <div id="candidates-inner"></div>
+</div>
+
+<div id="manual-section">
+  <details>
+    <summary>Type lot number manually</summary>
+    <div class="manual-inner">
+      <input id="lot-input" type="text" maxlength="50"
+             placeholder="e.g. 212521 or last 5+ digits"
+             autocomplete="off" autocorrect="off" spellcheck="false">
+      <button type="button" id="btn-manual-check">Check</button>
+      <div id="partial-results">
+        <h3 id="partial-heading"></h3>
+        <div id="partial-inner"></div>
+        <div id="partial-too-many"></div>
+      </div>
+    </div>
+  </details>
+</div>
+
+<div id="ocr-section">
+  <details>
+    <summary>Show raw OCR text</summary>
+    <div id="ocr-raw"></div>
+  </details>
+</div>
+
+<footer>
+  Data sourced from omnipod.com · For personal use only<br>
+  Always confirm with Insulet at 1-800-641-2049
+</footer>
+
+<!--
+  Pinned to tesseract.js v5.1.1. SRI hash ensures this exact file is served.
+  If you update the version, recompute the hash:
+    curl -sL https://cdn.jsdelivr.net/npm/tesseract.js@X.Y.Z/dist/tesseract.min.js \
+      | openssl dgst -sha384 -binary | openssl base64 -A
+-->
+<script
+  src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"
+  integrity="sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F"
+  crossorigin="anonymous"></script>
+
+<script>
+'use strict';
+
+// ─────────────────────────────────────────────
+//  AFFECTED LOT DATABASE  (Global, all regions)
+//  Source: omnipod.com/mdc/check-pod-lot?c=CC-5464839, May 2026
+// ─────────────────────────────────────────────
+const AFFECTED_LOTS = new Set([
+  // Omnipod Eros
+  'L71480','L72509','L72510','L72511','L72513','L72514','L72515','L72516','L72521',
+
+  // Omnipod DASH (all regions combined)
+  'PD1U02282525','PD1U02282526','PD1U03032521','PD1U03042521','PD1U03062521','PD1U03072521',
+  'PD1U04252521','PD1U09052421','PD1U11062421','PD1U11062521','PD1U11072421','PD1U11072521',
+  'PD1U11082421','PD1U11102521','PD1U11112511','PD1U11112522','PD1U11122521','PD1U01082621',
+  'PD1U02152521','PD1U02192521','PD1U04242522','PD1U09092421','PD1U09102421','PD1U10242421',
+  'PD1U10252421','PD1U10282421','PD1U10282522','PD1U10292421','PD1U10292521','PD1U10302521',
+  'PD1U10312421','PD1U10312521','PD1U11012421','PD1U11022421','PD1U11032521','PD1U11042421',
+  'PD1U11042521','PD1U11052421','PD1U11192421','PD1U04262521','PD1U04292521','PD1U09032421',
+  'PD1U11112421','PD1U11132421','PD1U11142421','PD1U11152411','PD1U11152421','PD1U11162421',
+  'PD1U11182421','PD1U09042421','PD1U11122421','PD1U11202421','PD1U09062421',
+
+  // Omnipod 5 — PH1U prefix
+  'PH1U01032521','PH1U01092621','PH1U01102521','PH1U01132521','PH1U01172521','PH1U01222521',
+  'PH1U01232522','PH1U01302522','PH1U01312511','PH1U01312521','PH1U02032521','PH1U02042521',
+  'PH1U02132511','PH1U02202521','PH1U02212521','PH1U02222521','PH1U03202521','PH1U03262521',
+  'PH1U03282521','PH1U03312521','PH1U04032521','PH1U04042521','PH1U04092521','PH1U04102521',
+  'PH1U04112521','PH1U04222521','PH1U04232511','PH1U04232521','PH1U04302524','PH1U05012521',
+  'PH1U05022521','PH1U05052521','PH1U06282422','PH1U09112421','PH1U09122421','PH1U09122422',
+  'PH1U09162421','PH1U09172421','PH1U09182421','PH1U09192421','PH1U09202421','PH1U09212421',
+  'PH1U09262411','PH1U09262421','PH1U10042421','PH1U10102421','PH1U10112422','PH1U10122421',
+  'PH1U10142421','PH1U10152421','PH1U10162421','PH1U10172421','PH1U10172522','PH1U10182422',
+  'PH1U10182521','PH1U10202521','PH1U10212521','PH1U10222521','PH1U10232521','PH1U10242521',
+  'PH1U10252521','PH1U11142521','PH1U11152521','PH1U11172511','PH1U11172521','PH1U11182521',
+  'PH1U11192511','PH1U11192521','PH1U11212421','PH1U11222421','PH1U11252421','PH1U11262421',
+  'PH1U12022421','PH1U12042521','PH1U12052521','PH1U12092421','PH1U12102412','PH1U12102421',
+  'PH1U12122421','PH1U12132422','PH1U12172421','PH1U12182421','PH1U01022521','PH1U04182521',
+  'PH1U10212421','PH1U12192411','PH1U12192421','PH1U12202421','PH1U01222522','PH1U01072521',
+  'PH1U01242521','PH1U01272513','PH1U03082521','PH1U04172521','PH1U04212521','PH1U10232421',
+
+  // Omnipod 5 — PR1U prefix
+  'PR1U01132621','PR1U01152621','PR1U01162621','PR1U01172621','PR1U01202621','PR1U01212621',
+  'PR1U01222621','PR1U01232621','PR1U01272621','PR1U01302641','PR1U01312631','PR1U02022641',
+  'PR1U02032631','PR1U02032641','PR1U02042641','PR1U02052631','PR1U02052641','PR1U02062631',
+  'PR1U02112641','PR1U02132611','PR1U02132641','PR1U11182531','PR1U11182541','PR1U11192531',
+  'PR1U11192532','PR1U11192541','PR1U11192542','PR1U11202521','PR1U11202532','PR1U11202533',
+  'PR1U11202541','PR1U11202542','PR1U11212521','PR1U11222521','PR1U11222531','PR1U11222541',
+  'PR1U11232541','PR1U11242521','PR1U11242531','PR1U11252512','PR1U11252521','PR1U11252531',
+  'PR1U11252541','PR1U11262521','PR1U11262541','PR1U12012521','PR1U12022521','PR1U12032521',
+  'PR1U12102522','PR1U12112521','PR1U12122521','PR1U12132511','PR1U12132521','PR1U12152521',
+  'PR1U12162521','PR1U12172521',
+]);
+
+// ─────────────────────────────────────────────
+//  HELPERS
+// ─────────────────────────────────────────────
+
+function productName(lot) {
+  if (lot.startsWith('L'))    return 'Omnipod Eros';
+  if (lot.startsWith('PD1U')) return 'Omnipod DASH';
+  if (lot.startsWith('PH1U')) return 'Omnipod 5';
+  if (lot.startsWith('PR1U')) return 'Omnipod 5 (Refill)';
+  return 'Omnipod Pod';
+}
+
+/** Strip to alphanumeric + spaces before passing to Web Speech API */
+function sanitizeForSpeech(str) {
+  return str.replace(/[^A-Z0-9 ]/gi, '');
+}
+
+// ─────────────────────────────────────────────
+//  LOT EXTRACTION from OCR text
+// ─────────────────────────────────────────────
+function extractLotCandidates(text) {
+  if (!text) return [];
+
+  // Normalise common OCR confusions in alphanumeric lot codes
+  const normalised = text.toUpperCase()
+    .replace(/O(?=\d)/g,       '0')  // O→0 before digit
+    .replace(/(?<=\d)O/g,      '0')  // O→0 after digit
+    .replace(/\bI(?=\d)/g,     '1'); // I→1 at word boundary before digit
+
+  const candidates = new Set();
+
+  // Full DASH / Omnipod 5 lot format: prefix + 8 alphanumeric chars
+  const reFull = /(?:P[DH]1U|PR1U)[0-9A-Z]{8}/g;
+  let m;
+  while ((m = reFull.exec(normalised)) !== null) candidates.add(m[0]);
+
+  // Eros short format: L + 5 digits
+  const reEros = /L\d{5}/g;
+  while ((m = reEros.exec(normalised)) !== null) candidates.add(m[0]);
+
+  return [...candidates];
+}
+
+// ─────────────────────────────────────────────
+//  CAMERA
+// ─────────────────────────────────────────────
+const video     = document.getElementById('video');
+const canvas    = document.getElementById('canvas');
+const frozenImg = document.getElementById('frozen-img');
+const btnScan   = document.getElementById('btn-scan');
+const btnRetake = document.getElementById('btn-retake');
+let stream   = null;
+let scanning = false;
+let currentBlobUrl = null;
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 960 } },
+      audio: false,
+    });
+    video.srcObject = stream;
+    video.style.display = 'block';
+    frozenImg.style.display = 'none';
+    btnScan.style.display = '';
+    btnRetake.style.display = 'none';
+  } catch (_err) {
+    // Camera unavailable — fall back to file picker
+    btnScan.textContent = '📂 Choose Photo';
+    btnScan.onclick = pickFile;
+  }
+}
+
+function captureFrame() {
+  canvas.width  = video.videoWidth  || 640;
+  canvas.height = video.videoHeight || 480;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+  frozenImg.src = dataUrl;
+  frozenImg.style.display = 'block';
+  video.style.display = 'none';
+  stream && stream.getTracks().forEach(t => { t.enabled = false; });
+  return dataUrl;
+}
+
+function retake() {
+  stream && stream.getTracks().forEach(t => { t.enabled = true; });
+  video.style.display = 'block';
+  frozenImg.style.display = 'none';
+  frozenImg.src = '';
+  btnScan.style.display = '';
+  btnRetake.style.display = 'none';
+  hideResult();
+  revokeBlobUrl();
+}
+
+function revokeBlobUrl() {
+  if (currentBlobUrl) {
+    URL.revokeObjectURL(currentBlobUrl);
+    currentBlobUrl = null;
+  }
+}
+
+function pickFile() {
+  const inp = document.createElement('input');
+  inp.type    = 'file';
+  inp.accept  = 'image/*';
+  inp.capture = 'environment';
+  inp.onchange = async () => {
+    if (!inp.files.length) return;
+    revokeBlobUrl();
+    currentBlobUrl = URL.createObjectURL(inp.files[0]);
+    frozenImg.src = currentBlobUrl;
+    frozenImg.style.display = 'block';
+    video.style.display = 'none';
+    btnScan.style.display = 'none';
+    btnRetake.style.display = '';
+    await runOCR(currentBlobUrl);
+  };
+  inp.click();
+}
+
+// ─────────────────────────────────────────────
+//  OCR
+// ─────────────────────────────────────────────
+async function runOCR(imageSource) {
+  showSpinner(true);
+  hideResult();
+  hideCandidates();
+
+  try {
+    const worker = await Tesseract.createWorker('eng', 1, { logger: () => {} });
+    await worker.setParameters({
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ',
+      tessedit_pageseg_mode: '6', // uniform block of text
+    });
+    const { data } = await worker.recognize(imageSource);
+    await worker.terminate();
+
+    const rawText = data.text || '';
+    document.getElementById('ocr-raw').textContent = rawText;
+    document.getElementById('ocr-section').style.display = 'block';
+
+    showSpinner(false);
+    const candidates = extractLotCandidates(rawText);
+
+    if (candidates.length === 0) {
+      showResult('unknown', '', 'No lot number found',
+        'Try holding the phone closer and steadier,\nor type the lot number manually below.');
+      return;
+    }
+    if (candidates.length === 1) {
+      const lot = candidates[0];
+      showResultForLot(lot, AFFECTED_LOTS.has(lot));
+    } else {
+      // Surface any recalled lot immediately; also show all candidates for review
+      const recalled = candidates.filter(c => AFFECTED_LOTS.has(c));
+      const primary  = recalled.length > 0 ? recalled[0] : candidates[0];
+      showResultForLot(primary, AFFECTED_LOTS.has(primary));
+      showCandidates(candidates);
+    }
+  } catch (err) {
+    showSpinner(false);
+    showResult('unknown', '', 'OCR Error',
+      'Could not process image.\nPlease type the lot number manually below.');
+    console.error('Tesseract error:', err);
+  }
+}
+
+// ─────────────────────────────────────────────
+//  UI HELPERS
+// ─────────────────────────────────────────────
+function showSpinner(on) {
+  document.getElementById('spinner').style.display = on ? 'block' : 'none';
+}
+
+function hideResult() {
+  const card = document.getElementById('result-card');
+  card.style.display = 'none';
+  card.className = '';
+}
+
+function hideCandidates() {
+  document.getElementById('candidates-list').style.display = 'none';
+}
+
+function showResultForLot(lot, affected) {
+  if (affected) {
+    showResult('recall', lot, '⚠ RECALL',
+      `This lot is affected by recall CC-5464839.\nProduct: ${productName(lot)}\n\nDo NOT use. Contact Insulet: 1-800-641-2049`);
+    speak(`Warning. Recall alert. Lot number ${sanitizeForSpeech(lot)} is recalled. Do not use this pod.`);
+  } else {
+    showResult('safe', lot, '✓ NOT RECALLED',
+      `Lot ${lot} is not on the recall list.\nProduct: ${productName(lot)}`);
+    speak(`Good. Lot number ${sanitizeForSpeech(lot)} is not recalled.`);
+  }
+}
+
+function showResult(type, lot, title, detail) {
+  const card = document.getElementById('result-card');
+  card.className = type;
+  document.getElementById('result-icon').textContent =
+    type === 'safe' ? '✅' : type === 'recall' ? '🚨' : '❓';
+  document.getElementById('result-title').textContent  = title;
+  document.getElementById('result-lot').textContent    = lot;
+  document.getElementById('result-lot').style.display  = lot ? 'inline-block' : 'none';
+  document.getElementById('result-detail').textContent = detail;
+  card.style.display = 'block';
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/** Build the OCR candidate buttons using DOM methods (no innerHTML with dynamic content) */
+function showCandidates(lots) {
+  const wrap  = document.getElementById('candidates-list');
+  const inner = document.getElementById('candidates-inner');
+  inner.textContent = ''; // safe clear
+  lots.forEach(lot => {
+    const btn = document.createElement('button');
+    btn.type      = 'button';
+    btn.className = 'cand-btn';
+    btn.textContent = lot; // textContent — never innerHTML
+    btn.addEventListener('click', () => {
+      showResultForLot(lot, AFFECTED_LOTS.has(lot));
+      hideCandidates();
+    });
+    inner.appendChild(btn);
+  });
+  wrap.style.display = 'block';
+}
+
+function speak(text) {
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.rate   = 0.9;
+  utt.volume = 1;
+  window.speechSynthesis.speak(utt);
+}
+
+// ─────────────────────────────────────────────
+//  MANUAL / PARTIAL LOOKUP
+// ─────────────────────────────────────────────
+
+/**
+ * Build the highlighted lot display using DOM nodes.
+ * `lot` and `query` both come from controlled sources (hardcoded Set / uppercase
+ * alphanumeric user input), but we use DOM methods rather than innerHTML regardless.
+ */
+function buildHighlightedLot(lot, query) {
+  const span = document.createElement('span');
+  span.className = 'pm-lot';
+  const idx = lot.indexOf(query);
+  if (idx === -1) {
+    span.textContent = lot;
+    return span;
+  }
+  span.appendChild(document.createTextNode(lot.slice(0, idx)));
+  const em = document.createElement('em');
+  em.textContent = lot.slice(idx, idx + query.length);
+  span.appendChild(em);
+  span.appendChild(document.createTextNode(lot.slice(idx + query.length)));
+  return span;
+}
+
+function doManualCheck() {
+  // Accept only uppercase alphanumeric — discard anything else
+  const raw = document.getElementById('lot-input').value.trim().toUpperCase();
+  const val = raw.replace(/[^A-Z0-9]/g, '');
+  if (!val) return;
+
+  const partialDiv   = document.getElementById('partial-results');
+  const partialHead  = document.getElementById('partial-heading');
+  const partialInner = document.getElementById('partial-inner');
+  const tooMany      = document.getElementById('partial-too-many');
+  partialInner.textContent = ''; // safe clear
+  tooMany.style.display    = 'none';
+
+  // Exact hit in the affected set
+  if (AFFECTED_LOTS.has(val)) {
+    partialDiv.style.display = 'none';
+    showResultForLot(val, true);
+    return;
+  }
+
+  // Partial search across all affected lots
+  const allLots = [...AFFECTED_LOTS];
+  const matches = allLots.filter(l => l.includes(val));
+
+  if (matches.length === 0) {
+    partialDiv.style.display = 'none';
+    showResult('safe', val, 'NOT IN RECALL LIST',
+      `"${val}" does not match any affected lot.\nIf you entered a partial number, it may simply not appear in recalled lots.\nFor certainty, enter the full lot number.`);
+    speak(`${sanitizeForSpeech(val)} was not found in the recall list.`);
+    return;
+  }
+
+  if (matches.length === 1) {
+    partialDiv.style.display = 'none';
+    showResultForLot(matches[0], true);
+    return;
+  }
+
+  // Multiple matches — show list
+  hideResult();
+  partialHead.textContent = `${matches.length} recalled lot${matches.length !== 1 ? 's' : ''} match "${val}" — tap to confirm:`;
+  partialDiv.style.display = 'block';
+
+  const MAX_SHOW = 20;
+  matches.slice(0, MAX_SHOW).forEach(lot => {
+    const row = document.createElement('div');
+    row.className = 'partial-match';
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+
+    row.appendChild(buildHighlightedLot(lot, val));
+
+    const badge = document.createElement('span');
+    badge.className = 'pm-badge bad';
+    badge.textContent = 'RECALL';
+    row.appendChild(badge);
+
+    const onSelect = () => {
+      partialDiv.style.display = 'none';
+      showResultForLot(lot, true);
+    };
+    row.addEventListener('click', onSelect);
+    row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') onSelect(); });
+
+    partialInner.appendChild(row);
+  });
+
+  if (matches.length > MAX_SHOW) {
+    tooMany.textContent = `…and ${matches.length - MAX_SHOW} more. Type more characters to narrow down.`;
+    tooMany.style.display = 'block';
+  }
+}
+
+// ─────────────────────────────────────────────
+//  EVENT WIRING
+// ─────────────────────────────────────────────
+btnScan.addEventListener('click', async () => {
+  if (scanning) return;
+  scanning = true;
+  btnScan.style.display   = 'none';
+  btnRetake.style.display = '';
+  const dataUrl = captureFrame();
+  await runOCR(dataUrl);
+  scanning = false;
+});
+
+btnRetake.addEventListener('click', () => {
+  retake();
+  document.getElementById('ocr-section').style.display = 'none';
+  hideCandidates();
+});
+
+document.getElementById('btn-manual-check').addEventListener('click', doManualCheck);
+
+document.getElementById('lot-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doManualCheck();
+});
+
+// Debounced live search (fires after user pauses typing)
+let debounceTimer;
+document.getElementById('lot-input').addEventListener('input', () => {
+  clearTimeout(debounceTimer);
+  const val = document.getElementById('lot-input').value.trim().replace(/[^A-Z0-9]/gi, '');
+  if (val.length >= 4) {
+    debounceTimer = setTimeout(doManualCheck, 350);
+  } else {
+    document.getElementById('partial-results').style.display = 'none';
+    hideResult();
+  }
+});
+
+// ─────────────────────────────────────────────
+//  INIT
+// ─────────────────────────────────────────────
+startCamera();
+</script>
+</body>
+</html>
