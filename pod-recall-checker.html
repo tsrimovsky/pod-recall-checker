@@ -3,24 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <!--
-    Content Security Policy:
-    - default-src 'none'            : block everything not explicitly listed
-    - script-src 'self' + jsDelivr  : allow only our inline script and the pinned CDN
-    - connect-src cdn.jsdelivr.net  : Tesseract fetches worker + language data from same CDN
-    - img-src 'self' blob: data:    : camera frames (blob:) and captured images (data:)
-    - style-src 'unsafe-inline'     : inline <style> block only (no external CSS)
-    - media-src 'self'              : camera stream
-    - worker-src blob:              : Tesseract spins up a Web Worker from a blob URL
+    Security: external scripts are pinned with Subresource Integrity (SRI) hashes
+    on the <script> tags below. The browser will refuse to run any script whose
+    content doesn't match the hash, protecting against CDN tampering.
+    A strict CSP was removed because Tesseract.js fetches worker and language-data
+    assets from several sub-paths at runtime, making a tight policy impractical
+    without a build step to enumerate them all.
   -->
-  <meta http-equiv="Content-Security-Policy" content="
-    default-src 'none';
-    script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline';
-    connect-src https://cdn.jsdelivr.net;
-    img-src 'self' blob: data:;
-    style-src 'unsafe-inline';
-    media-src 'self';
-    worker-src blob:;
-  ">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
